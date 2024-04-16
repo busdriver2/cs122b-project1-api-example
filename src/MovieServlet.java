@@ -12,16 +12,15 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.Statement;
 
+// Declaring a WebServlet called SingleStarServlet, which maps to url "/api/single-star"
+@WebServlet(name = "MovieServlet", urlPatterns = "/api/movie")
+public class MovieServlet extends HttpServlet {
+    private static final long serialVersionUID = 2L;
 
-// Declaring a WebServlet called StarsServlet, which maps to url "/api/stars"
-@WebServlet(name = "StarsServlet", urlPatterns = "/api/stars")
-public class StarsServlet extends HttpServlet {
-    private static final long serialVersionUID = 1L;
-
-    // Create a dataSource which registered in web.
+    // Create a dataSource which registered in web.xml
     private DataSource dataSource;
 
     public void init(ServletConfig config) {
@@ -33,29 +32,35 @@ public class StarsServlet extends HttpServlet {
     }
 
     /**
-     * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse response)
+     * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse
+     * response)
      */
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
 
         response.setContentType("application/json"); // Response mime type
+
+        // Retrieve parameter id from url request.
+        String id = request.getParameter("id");
+
+        // The log message can be found in localhost log
+        request.getServletContext().log("getting id: " + id);
 
         // Output stream to STDOUT
         PrintWriter out = response.getWriter();
 
         // Get a connection from dataSource and let resource manager close the connection after usage.
         try (Connection conn = dataSource.getConnection()) {
+            // Get a connection from dataSource
 
-            // Declare our statement
-            Statement statement = conn.createStatement();
-
+            // Construct a query with parameter represented by "?"
             String query = "SELECT\n" +
                     "\tm.id,\n" +
                     "    m.title,\n" +
                     "    m.year,\n" +
                     "    m.director,\n" +
-                    "    substring_index(group_concat(DISTINCT g.name ORDER BY g.id SEPARATOR ', '), ',', 3) as genres,\n" +
-                    "\tsubstring_index(group_concat(DISTINCT s.name ORDER BY s.id SEPARATOR ', '), ',', 3) as stars,\n" +
-                    "\tsubstring_index(GROUP_CONCAT(DISTINCT s.id ORDER BY s.id SEPARATOR ', '), ',', 3) AS star_ids,\n" +
+                    "    group_concat(DISTINCT g.name ORDER BY g.id SEPARATOR ', ') as genres,\n" +
+                    "\tgroup_concat(DISTINCT s.name ORDER BY s.id SEPARATOR ', ')as stars,\n" +
+                    "\tgroup_concat(DISTINCT s.id ORDER BY s.id SEPARATOR ', ') AS star_ids,\n" +
                     "    r.rating\n" +
                     "FROM\n" +
                     "    movies m\n" +
@@ -72,68 +77,47 @@ public class StarsServlet extends HttpServlet {
                     "GROUP BY\n" +
                     "    m.id;\n";
 
+            // Declare our statement
+            PreparedStatement statement = conn.prepareStatement(query);
+
+            // Set the parameter represented by "?" in the query to the id we get from url,
+            // num 1 indicates the first "?" in the query
+            statement.setString(1, id);
+
             // Perform the query
-            ResultSet rs = statement.executeQuery(query);
+            ResultSet rs = statement.executeQuery();
 
             JsonArray jsonArray = new JsonArray();
 
             // Iterate through each row of rs
             while (rs.next()) {
+
                 String movie_id = rs.getString("id");
                 String movie_title = rs.getString("title");
                 String movie_year = rs.getString("year");
                 String movie_director = rs.getString("director");
                 String movie_genres = rs.getString("genres");
-                String[] movie_stars = rs.getString("stars").split(", ");
-                String[] movie_star_ids = rs.getString("star_ids").split(", ");
-
+                String movie_stars = rs.getString("stars");
+                String movie_star_ids = rs.getString("star_ids");
                 String movie_rating = rs.getString("rating");
 
-
-
                 // Create a JsonObject based on the data we retrieve from rs
+
                 JsonObject jsonObject = new JsonObject();
                 jsonObject.addProperty("movie_id", movie_id);
                 jsonObject.addProperty("movie_title", movie_title);
-                jsonObject.addProperty("movie_year", movie_year);
                 jsonObject.addProperty("movie_director", movie_director);
+                jsonObject.addProperty("movie_year", movie_year);
+
                 jsonObject.addProperty("movie_genres", movie_genres);
-                jsonObject.addProperty("movie_star_1", movie_stars[0]);
-                if (movie_stars.length > 1) {
-                    jsonObject.addProperty("movie_star_2", movie_stars[1]);
-                } else {
-                    jsonObject.addProperty("movie_star_2", "None");
-                }
-                if (movie_stars.length > 2) {
-                    jsonObject.addProperty("movie_star_3", movie_stars[2]);
-                } else {
-                    jsonObject.addProperty("movie_star_3", "None");
-                }
-                jsonObject.addProperty("movie_star_id_1", movie_star_ids[0]);
-                if (movie_star_ids.length > 1) {
-                    jsonObject.addProperty("movie_star_id_2", movie_star_ids[1]);
-                } else {
-                    jsonObject.addProperty("movie_star_id_2", "None");
-                }
-                if (movie_star_ids.length > 2) {
-                    jsonObject.addProperty("movie_star_id_3", movie_star_ids[2]);
-                } else {
-                    jsonObject.addProperty("movie_star_id_3", "None");
-                }
-                //jsonObject.addProperty("movie_star_2", movie_stars[1]);
-                //jsonObject.addProperty("movie_star_3", movie_stars[2]);
-
+                jsonObject.addProperty("movie_stars", movie_stars);
+                jsonObject.addProperty("movie_star_ids", movie_star_ids);
                 jsonObject.addProperty("movie_rating", movie_rating);
-
-
 
                 jsonArray.add(jsonObject);
             }
             rs.close();
             statement.close();
-
-            // Log to localhost log
-            request.getServletContext().log("getting " + jsonArray.size() + " results");
 
             // Write JSON string to output
             out.write(jsonArray.toString());
@@ -141,12 +125,13 @@ public class StarsServlet extends HttpServlet {
             response.setStatus(200);
 
         } catch (Exception e) {
-
             // Write error message JSON object to output
             JsonObject jsonObject = new JsonObject();
             jsonObject.addProperty("errorMessage", e.getMessage());
             out.write(jsonObject.toString());
 
+            // Log error to localhost log
+            request.getServletContext().log("Error:", e);
             // Set response status to 500 (Internal Server Error)
             response.setStatus(500);
         } finally {
@@ -156,4 +141,5 @@ public class StarsServlet extends HttpServlet {
         // Always remember to close db connection after usage. Here it's done by try-with-resources
 
     }
+
 }
